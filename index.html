@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ComfyBox · ComfyUI 本地控制台</title>
+<style>
+  :root{
+    --bg:#101116; --bg2:#161821; --panel:#1b1e28; --panel2:#222634;
+    --line:#2b3040; --line2:#39405a;
+    --fg:#e8eaf1; --fg2:#b6bccd; --mute:#7c8499;
+    --acc:#ff6b3d; --acc2:#ffa06b; --blue:#5b8cff; --green:#2ecc71; --red:#ff4d5e; --amber:#ffb020;
+    --radius:12px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.5 "Segoe UI","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  button{font:inherit; cursor:pointer}
+
+  /* ---------- 顶栏 ---------- */
+  .topbar{
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+    padding:10px 16px; background:linear-gradient(180deg,#1c1f2b,#151822);
+    border-bottom:1px solid var(--line); flex:0 0 auto;
+  }
+  .brand{display:flex; align-items:center; gap:9px; white-space:nowrap}
+  .brand .logo{
+    width:26px;height:26px;border-radius:8px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--acc),#c9351f); color:#fff; font-size:15px;
+  }
+  .brand b{font-size:16px; letter-spacing:.3px}
+  .brand .sub{color:var(--mute); font-size:12px; border-left:1px solid var(--line2); padding-left:9px}
+
+  .statusline{display:flex; align-items:center; gap:12px; flex-wrap:wrap; flex:1 1 420px}
+  .pill{
+    display:inline-flex; align-items:center; gap:7px; padding:4px 11px; border-radius:999px;
+    font-size:12.5px; font-weight:600; border:1px solid transparent; white-space:nowrap;
+  }
+  .pill .dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}
+  .pill.on{color:#8ff0b6; background:rgba(46,204,113,.12); border-color:rgba(46,204,113,.35)}
+  .pill.off{color:#ff9aa5; background:rgba(255,77,94,.12); border-color:rgba(255,77,94,.32)}
+  .pill.wait{color:#ffd88a; background:rgba(255,176,32,.12); border-color:rgba(255,176,32,.35)}
+  .pill.wait .dot{animation:blink .9s infinite}
+  @keyframes blink{50%{opacity:.2}}
+
+  .stat{font-size:12.5px; color:var(--fg2); white-space:nowrap}
+  .stat b{color:var(--fg); font-weight:600}
+  .meter{display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--fg2); white-space:nowrap}
+  .track{width:96px;height:7px;border-radius:99px;background:#2a2f3f;overflow:hidden;border:1px solid #333a4d}
+  .track i{display:block;height:100%;width:0;border-radius:99px;transition:width .4s ease}
+  #vramFill{background:linear-gradient(90deg,#ff6b3d,#ffb020)}
+  #ramFill{background:linear-gradient(90deg,#5b8cff,#8fb0ff)}
+
+  .actions{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+  .btn{
+    padding:7px 13px; border-radius:9px; border:1px solid var(--line2);
+    background:var(--panel2); color:var(--fg); font-size:13px; transition:.15s;
+  }
+  .btn:hover{background:#2b3142; border-color:#4a5470}
+  .btn:active{transform:translateY(1px)}
+  .btn:disabled{opacity:.42; cursor:not-allowed; transform:none}
+  .btn.primary{background:linear-gradient(180deg,#ff7a4d,#e2521f); border-color:#ff8b5e; color:#fff; font-weight:600}
+  .btn.primary:hover{background:linear-gradient(180deg,#ff8a60,#ef5c25)}
+  .btn.danger{border-color:rgba(255,77,94,.5); color:#ff9aa5; background:rgba(255,77,94,.09)}
+  .btn.danger:hover{background:rgba(255,77,94,.18)}
+  .btn.ghost{background:transparent}
+
+  /* ---------- 标签页 ---------- */
+  .tabs{display:flex; gap:2px; padding:0 12px; background:var(--bg2); border-bottom:1px solid var(--line); flex:0 0 auto}
+  .tab{
+    padding:9px 15px; font-size:13px; color:var(--mute); background:none; border:none;
+    border-bottom:2px solid transparent; margin-bottom:-1px;
+  }
+  .tab:hover{color:var(--fg2)}
+  .tab.active{color:var(--fg); border-bottom-color:var(--acc); font-weight:600}
+  .tab .badge{
+    display:inline-block; margin-left:6px; padding:0 6px; border-radius:99px;
+    background:#2b3142; color:var(--fg2); font-size:11px; line-height:17px; vertical-align:1px;
+  }
+
+  /* ---------- 主体 ---------- */
+  main{flex:1 1 auto; position:relative; overflow:hidden}
+  .view{position:absolute; inset:0; display:none; overflow:auto}
+  .view.active{display:block}
+  .pad{padding:16px 18px 26px}
+
+  /* 工作台：iframe 占满 */
+  #view-work{padding:0; overflow:hidden}
+  #frame{width:100%; height:100%; border:0; background:#0e0f13; display:block}
+  /* 工作台右下角悬浮工具条：平时半透明，不挡画布 */
+  #workBar{
+    position:absolute; right:14px; bottom:14px; z-index:6;
+    display:flex; gap:8px; opacity:.3; transition:opacity .18s;
+  }
+  #workBar:hover, #workBar:focus-within{opacity:1}
+  #workBar .btn{box-shadow:0 2px 10px rgba(0,0,0,.45)}
+  .blank{
+    position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; text-align:center; padding:24px; background:var(--bg);
+  }
+  .blank .big{font-size:46px; opacity:.5}
+  .blank h2{margin:0; font-size:19px; font-weight:600}
+  .blank p{margin:0; color:var(--mute); max-width:520px; font-size:13.5px}
+  .spinner{
+    width:26px;height:26px;border-radius:50%;border:3px solid #333a4d;border-top-color:var(--acc);
+    animation:spin .8s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* 概览卡片 */
+  .cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(228px,1fr)); gap:12px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:13px 15px}
+  .card .k{font-size:12px; color:var(--mute); margin-bottom:6px; letter-spacing:.3px}
+  .card .v{font-size:17px; font-weight:600; word-break:break-all; line-height:1.35}
+  .card .v.small{font-size:13.5px; font-weight:500; color:var(--fg2)}
+  .card.wide{grid-column:span 2}
+  @media(max-width:760px){.card.wide{grid-column:span 1}}
+
+  h3.sec{margin:22px 0 10px; font-size:14px; color:var(--fg2); font-weight:600}
+  h3.sec:first-child{margin-top:0}
+
+  /* 模型 / 列表 */
+  .slot{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); margin-bottom:12px; overflow:hidden}
+  .slot .head{display:flex; align-items:center; gap:9px; padding:10px 14px; border-bottom:1px solid var(--line); background:#1e222e}
+  .slot .head b{font-size:13.5px}
+  .slot .head .path{color:var(--mute); font-size:11.5px; margin-left:auto; font-family:ui-monospace,Consolas,monospace}
+  .slot .empty{padding:12px 14px; color:var(--mute); font-size:13px}
+  .row{display:flex; align-items:center; gap:10px; padding:8px 14px; border-top:1px solid #232838; font-size:13px}
+  .row:first-child{border-top:0}
+  .row .nm{flex:1 1 auto; word-break:break-all; font-family:ui-monospace,Consolas,monospace; font-size:12.5px}
+  .row .sz{color:var(--fg2); font-size:12px; white-space:nowrap}
+  .wfrow{cursor:pointer}
+  .wfrow:hover{background:#242938}
+  .wfrow .nm{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+
+  /* 画廊 */
+  .gal{display:grid; grid-template-columns:repeat(auto-fill,minmax(158px,1fr)); gap:11px}
+  .thumb{
+    position:relative; aspect-ratio:1/1; border-radius:10px; overflow:hidden; cursor:zoom-in;
+    background:#0e0f13; border:1px solid var(--line);
+  }
+  .thumb img{width:100%; height:100%; object-fit:cover; display:block}
+  .thumb .cap{
+    position:absolute; left:0; right:0; bottom:0; padding:14px 8px 6px; font-size:11px; color:#dfe3ee;
+    background:linear-gradient(transparent,rgba(0,0,0,.82)); display:flex; justify-content:space-between; gap:6px;
+  }
+  .thumb .cap span:last-child{color:#9aa2b6; white-space:nowrap}
+
+  /* 日志 */
+  pre.log{
+    margin:0; padding:14px; background:#0d0e12; border:1px solid var(--line); border-radius:var(--radius);
+    color:#c9d1e4; font:12.5px/1.55 ui-monospace,Consolas,"Courier New",monospace;
+    white-space:pre-wrap; word-break:break-all; max-height:none;
+  }
+  .toolbar{display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap}
+  .toolbar .hint{color:var(--mute); font-size:12.5px; margin-left:auto}
+
+  /* 灯箱 */
+  .light{
+    position:fixed; inset:0; background:rgba(6,7,10,.93); display:none; z-index:50;
+    align-items:center; justify-content:center; padding:26px;
+  }
+  .light.open{display:flex}
+  .light img{max-width:94%; max-height:88%; border-radius:8px; box-shadow:0 18px 60px rgba(0,0,0,.7)}
+  .light .meta{position:absolute; bottom:16px; left:0; right:0; text-align:center; color:#aab2c6; font-size:12.5px}
+  .light .x{position:absolute; top:16px; right:20px; font-size:26px; color:#8c93a6; background:none; border:0}
+  .light .x:hover{color:#fff}
+
+  /* 提示条 */
+  #toast{
+    position:fixed; left:50%; bottom:26px; transform:translate(-50%,26px);
+    background:#242938; border:1px solid var(--line2); color:var(--fg);
+    padding:10px 16px; border-radius:10px; font-size:13px; opacity:0; pointer-events:none;
+    transition:.25s; z-index:60; max-width:70vw; box-shadow:0 10px 30px rgba(0,0,0,.5);
+  }
+  #toast.show{opacity:1; transform:translate(-50%,0)}
+  #toast.err{border-color:rgba(255,77,94,.55)}
+  #toast.ok{border-color:rgba(46,204,113,.5)}
+
+  ::-webkit-scrollbar{width:11px;height:11px}
+  ::-webkit-scrollbar-track{background:#12141b}
+  ::-webkit-scrollbar-thumb{background:#333a4d; border-radius:99px; border:2px solid #12141b}
+  ::-webkit-scrollbar-thumb:hover{background:#454e68}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">◍</span>
+    <b>ComfyBox</b>
+    <span class="sub">ComfyUI 本地控制台</span>
+  </div>
+
+  <div class="statusline">
+    <span id="pill" class="pill off"><span class="dot"></span><span id="pillText">检测中…</span></span>
+    <span class="stat" id="sGpu"><b>—</b></span>
+    <span class="meter">显存 <span class="track"><i id="vramFill"></i></span> <b id="vramText">—</b></span>
+    <span class="meter">内存 <span class="track"><i id="ramFill"></i></span> <b id="ramText">—</b></span>
+    <span class="stat">队列 <b id="sQueue">0</b></span>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" id="btnStart">启动 ComfyUI</button>
+    <button class="btn danger" id="btnStop">停止</button>
+    <button class="btn ghost" id="btnFolder">输出文件夹</button>
+    <button class="btn ghost" id="btnTab">新标签打开</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-v="work">工作台</button>
+  <button class="tab" data-v="dash">概览</button>
+  <button class="tab" data-v="wf">工作流<span class="badge" id="wfBadge">0</span></button>
+  <button class="tab" data-v="models">模型<span class="badge" id="mBadge">0</span></button>
+  <button class="tab" data-v="gallery">输出<span class="badge" id="gBadge">0</span></button>
+  <button class="tab" data-v="log">日志</button>
+</nav>
+
+<main>
+  <!-- 工作台 -->
+  <section class="view active" id="view-work">
+    <iframe id="frame" title="ComfyUI 工作台"></iframe>
+    <div class="blank" id="blank">
+      <div class="big" id="blankIcon">◍</div>
+      <h2 id="blankTitle">ComfyUI 未启动</h2>
+      <p id="blankText">点右上角「启动 ComfyUI」或下面的按钮，模型加载完成后工作台会自动出现在这里。</p>
+      <div class="spinner" id="blankSpin" style="display:none"></div>
+      <button class="btn primary" id="blankBtn">启动 ComfyUI</button>
+    </div>
+    <div id="workBar">
+      <button class="btn ghost" id="btnReloadFrame" title="重新加载 ComfyUI 界面，让它重新读取工作流与模型列表（画布上未保存的改动会丢失）">重载界面</button>
+    </div>
+  </section>
+
+  <!-- 概览 -->
+  <section class="view" id="view-dash">
+    <div class="pad">
+      <h3 class="sec">运行状态</h3>
+      <div class="cards" id="dashCards"></div>
+      <h3 class="sec">环境路径</h3>
+      <div class="cards" id="pathCards"></div>
+    </div>
+  </section>
+
+  <!-- 工作流 -->
+  <section class="view" id="view-wf">
+    <div class="pad">
+      <div class="toolbar">
+        <button class="btn" id="btnReloadWf">重新扫描</button>
+        <button class="btn ghost" id="btnOpenWf">打开工作流目录</button>
+        <span class="hint" id="wfHint">这些就是 ComfyUI 工作台里能打开的工作流。</span>
+      </div>
+      <div id="wfList"><p style="color:var(--mute)">加载中…</p></div>
+    </div>
+  </section>
+
+  <!-- 模型 -->
+  <section class="view" id="view-models">
+    <div class="pad">
+      <div class="toolbar">
+        <button class="btn" id="btnReloadModels">重新扫描</button>
+        <button class="btn ghost" id="btnOpenModels">打开模型目录</button>
+        <span class="hint">把模型文件放进对应目录后，点「重新扫描」即可；ComfyUI 界面里刷新一下节点就能选到。</span>
+      </div>
+      <div id="modelList"><p style="color:var(--mute)">加载中…</p></div>
+    </div>
+  </section>
+
+  <!-- 输出 -->
+  <section class="view" id="view-gallery">
+    <div class="pad">
+      <div class="toolbar">
+        <button class="btn" id="btnReloadGal">刷新</button>
+        <button class="btn ghost" id="btnOpenOut">打开输出目录</button>
+        <span class="hint" id="galHint">—</span>
+      </div>
+      <div class="gal" id="galGrid"></div>
+      <p id="galEmpty" style="color:var(--mute); display:none">还没有图片。在工作台里跑一次生图，出图会自动出现在这里。</p>
+    </div>
+  </section>
+
+  <!-- 日志 -->
+  <section class="view" id="view-log">
+    <div class="pad">
+      <div class="toolbar">
+        <button class="btn" id="btnLogComfy">ComfyUI 日志</button>
+        <button class="btn ghost" id="btnLogBox">控制台日志</button>
+        <button class="btn ghost" id="btnLogOpen">打开日志目录</button>
+        <span class="hint">ComfyUI 启动失败时，看这里能直接看到报错原因。</span>
+      </div>
+      <pre class="log" id="logBox">加载中…</pre>
+    </div>
+  </section>
+</main>
+
+<div class="light" id="light">
+  <button class="x" id="lightX">×</button>
+  <img id="lightImg" alt="" />
+  <div class="meta" id="lightMeta"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var CFG = { comfyUrl: "http://127.0.0.1:8188" };
+  var last = null;       // 最近一次 status
+  var frameLoaded = false;
+  var curLog = "comfy";
+
+  /* ---------------- 通用请求 ---------------- */
+  function api(path, method) {
+    return fetch(path, { method: method || "GET", cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .catch(function (e) { return { ok: false, msg: "请求失败：" + e }; });
+  }
+
+  var toastTimer = null;
+  function toast(msg, kind) {
+    var t = $("toast");
+    t.textContent = msg;
+    t.className = "show " + (kind || "");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.className = ""; }, 3200);
+  }
+
+  function fmtGB(n) { return (n / 1073741824).toFixed(1); }
+  function pct(used, total) {
+    if (!total) return 0;
+    return Math.max(0, Math.min(100, (used / total) * 100));
+  }
+  function setMeter(fillId, textId, total, free) {
+    if (!total) { $(fillId).style.width = "0%"; $(textId).textContent = "—"; return; }
+    var used = total - (free || 0);
+    $(fillId).style.width = pct(used, total).toFixed(1) + "%";
+    $(textId).textContent = fmtGB(used) + " / " + fmtGB(total) + " GB";
+  }
+
+  /* ---------------- 状态刷新 ---------------- */
+  function refreshStatus() {
+    return api("/api/status").then(function (r) {
+      if (!r || !r.ok) return;
+      last = r.status;
+      render(r.status, r.box);
+    });
+  }
+
+  function render(s, box) {
+    var pill = $("pill"), pt = $("pillText");
+    if (s.running) {
+      pill.className = "pill on";
+      pt.textContent = "运行中 · 端口 " + s.port;
+    } else if (s.starting) {
+      pill.className = "pill wait";
+      pt.textContent = "启动中 · 正在加载模型…";
+    } else {
+      pill.className = "pill off";
+      pt.textContent = "已停止";
+    }
+
+    $("sGpu").innerHTML = "<b>" + (s.gpu || (s.running ? "GPU 读取中" : "GPU 待启动")) + "</b>";
+    setMeter("vramFill", "vramText", s.vram_total, s.vram_free);
+    setMeter("ramFill", "ramText", s.ram_total, s.ram_free);
+    $("sQueue").textContent = s.running ? (s.queue_running + s.queue_pending) : "0";
+
+    $("btnStart").disabled = !!s.running;
+    $("btnStop").disabled = !s.running;
+    $("btnTab").disabled = !s.running;
+
+    $("blankBtn").disabled = !!s.running || !!s.starting;
+    $("blankSpin").style.display = s.starting ? "block" : "none";
+
+    // 工作台 iframe 挂载 / 卸载
+    var f = $("frame");
+    if (s.running) {
+      $("blank").style.display = "none";
+      if (!frameLoaded) { f.src = CFG.comfyUrl + "/"; frameLoaded = true; }
+    } else {
+      $("blank").style.display = "flex";
+      if (frameLoaded) { f.src = "about:blank"; frameLoaded = false; }
+      $("blankIcon").textContent = s.starting ? "◌" : "◍";
+      $("blankTitle").textContent = s.starting ? "ComfyUI 正在启动…" : "ComfyUI 未启动";
+      $("blankText").textContent = s.starting
+        ? "首次启动需要把 SDXL 模型加载进显存，大约 20–60 秒，稍等片刻。"
+        : "点右上角「启动 ComfyUI」或下面的按钮，模型加载完成后工作台会自动出现在这里。";
+    }
+
+    renderDash(s, box);
+  }
+
+  function card(k, v, small, wide) {
+    return '<div class="card' + (wide ? " wide" : "") + '"><div class="k">' + k + '</div>' +
+      '<div class="v' + (small ? " small" : "") + '">' + v + '</div></div>';
+  }
+
+  function renderDash(s, box) {
+    var c = [];
+    c.push(card("ComfyUI", s.running ? "运行中" : (s.starting ? "启动中" : "已停止")));
+    c.push(card("进程 PID", s.pid || "—"));
+    c.push(card("版本", s.version || "—"));
+    c.push(card("PyTorch", s.torch || "—"));
+    c.push(card("显卡", s.gpu || "—", true, true));
+    if (s.vram_total) {
+      c.push(card("显存占用", fmtGB(s.vram_total - (s.vram_free || 0)) + " / " + fmtGB(s.vram_total) + " GB"));
+    } else { c.push(card("显存占用", "—")); }
+    if (s.ram_total) {
+      c.push(card("内存占用", fmtGB(s.ram_total - (s.ram_free || 0)) + " / " + fmtGB(s.ram_total) + " GB"));
+    } else { c.push(card("内存占用", "—")); }
+    c.push(card("任务队列", s.running ? (s.queue_running + " 运行 / " + s.queue_pending + " 等待") : "—"));
+    c.push(card("控制台地址", "http://127.0.0.1:" + ((box && box.boxPort) || 8790), true));
+    $("dashCards").innerHTML = c.join("");
+
+    if (box) {
+      var p = [];
+      p.push(card("ComfyUI 程序目录", box.comfyDir, true));
+      p.push(card("输出目录", box.outDir, true));
+      p.push(card("模型目录", box.modelsDir, true));
+      p.push(card("虚拟环境", box.venv, true));
+      p.push(card("自定义节点", box.customNodeCount + " 个", false, false));
+      p.push(card("日志目录", box.logDir, true));
+      $("pathCards").innerHTML = p.join("");
+    }
+  }
+
+  /* ---------------- 动作 ---------------- */
+  function doStart() {
+    toast("正在启动 ComfyUI…");
+    api("/api/start", "POST").then(function (r) {
+      toast(r.msg || "已发出指令", r.ok ? "ok" : "err");
+      setTimeout(refreshStatus, 800);
+    });
+  }
+  function doStop() {
+    if (!confirm("确定停止 ComfyUI？\n\n会释放约 1–2GB 显存和最多十几 GB 内存，已生成的图片不受影响。")) return;
+    toast("正在停止…");
+    api("/api/stop", "POST").then(function (r) {
+      toast(r.msg || "已停止", r.ok ? "ok" : "err");
+      setTimeout(refreshStatus, 600);
+    });
+  }
+
+  $("btnStart").onclick = doStart;
+  $("blankBtn").onclick = doStart;
+  $("btnStop").onclick = doStop;
+  $("btnFolder").onclick = function () { openPath("output"); };
+  $("btnOpenOut").onclick = function () { openPath("output"); };
+  $("btnOpenModels").onclick = function () { openPath("models"); };
+  $("btnOpenWf").onclick = function () { openPath("workflows"); };
+  $("btnReloadWf").onclick = loadWorkflows;
+  $("btnReloadFrame").onclick = reloadFrame;
+  $("btnLogOpen").onclick = function () { openPath("log"); };
+  $("btnTab").onclick = function () { window.open(CFG.comfyUrl + "/", "_blank"); };
+
+  function openPath(what) {
+    api("/api/open?what=" + what).then(function (r) { toast(r.msg || "", r.ok ? "ok" : "err"); });
+  }
+
+  /* ---------------- 标签切换 ---------------- */
+  var tabs = document.querySelectorAll(".tab");
+  Array.prototype.forEach.call(tabs, function (t) {
+    t.onclick = function () {
+      Array.prototype.forEach.call(tabs, function (x) { x.classList.remove("active"); });
+      t.classList.add("active");
+      var v = t.dataset.v;
+      ["work", "dash", "wf", "models", "gallery", "log"].forEach(function (n) {
+        $("view-" + n).classList.toggle("active", n === v);
+      });
+      if (v === "wf") loadWorkflows();
+      if (v === "models") loadModels();
+      if (v === "gallery") loadGallery();
+      if (v === "log") loadLog();
+    };
+  });
+
+  /* ---------------- 模型 ---------------- */
+  function loadModels() {
+    var host = $("modelList");
+    host.innerHTML = '<p style="color:var(--mute)">扫描中…</p>';
+    api("/api/models").then(function (r) {
+      if (!r || !r.ok) { host.innerHTML = '<p style="color:var(--red)">扫描失败</p>'; return; }
+      var total = 0, html = "";
+      r.slots.forEach(function (sl) {
+        total += sl.items.length;
+        html += '<div class="slot"><div class="head"><b>' + sl.label + '</b>' +
+          '<span class="badge" style="background:#2b3142;color:#b6bccd;padding:0 7px;border-radius:99px;font-size:11px">' +
+          sl.items.length + '</span>' +
+          '<span class="path">models\\' + sl.key + '</span></div>';
+        if (!sl.items.length) {
+          html += '<div class="empty">' + (sl.exists ? "（空）" : "目录不存在") + '</div>';
+        } else {
+          sl.items.forEach(function (it) {
+            html += '<div class="row"><span class="nm">' + esc(it.name) + '</span>' +
+              '<span class="sz">' + it.sizeText + '</span></div>';
+          });
+        }
+        html += '</div>';
+      });
+      host.innerHTML = html;
+      $("mBadge").textContent = total;
+    });
+  }
+
+  /* ---------------- 工作流 ---------------- */
+  function loadWorkflows() {
+    var host = $("wfList");
+    host.innerHTML = '<p style="color:var(--mute)">扫描中…</p>';
+    api("/api/workflows").then(function (r) {
+      if (!r || !r.ok) { host.innerHTML = '<p style="color:var(--red)">扫描失败</p>'; return; }
+      var items = r.items || [];
+      $("wfBadge").textContent = items.length;
+      if (!items.length) {
+        host.innerHTML = '<div class="slot"><div class="empty">' +
+          (r.exists ? "这个目录下还没有工作流 — 在工作台里搭好一个、Ctrl+S 保存后就会出现在这里。"
+                    : "工作流目录还不存在：<br>" + esc(r.dir || "")) +
+          '</div></div>';
+        return;
+      }
+      var html = '<div class="slot"><div class="head"><b>已保存的工作流</b>' +
+        '<span class="badge" style="background:#2b3142;color:#b6bccd;padding:0 7px;border-radius:99px;font-size:11px">' +
+        items.length + '</span>' +
+        '<span class="path">' + esc(r.dir || "") + '</span></div>';
+      items.forEach(function (it) {
+        html += '<div class="row wfrow" data-file="' + esc(it.file) + '" title="点击复制文件名">' +
+          '<span class="nm">' + esc(it.name) + '</span>' +
+          '<span class="sz">' + (it.nodes == null ? "—" : it.nodes + " 节点") + '</span>' +
+          '<span class="sz">' + esc(it.sizeText) + '</span>' +
+          '<span class="sz">' + fmtTime(it.mtime) + '</span></div>';
+      });
+      html += '</div>';
+      host.innerHTML = html;
+      Array.prototype.forEach.call(host.querySelectorAll(".wfrow"), function (el) {
+        el.onclick = function () {
+          copyText(el.dataset.file);
+          toast("已复制文件名：" + el.dataset.file, "ok");
+        };
+      });
+    });
+  }
+
+  function fmtTime(t) {
+    if (!t) return "—";
+    var d = new Date(t * 1000);
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  function copyText(s) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(s); return; }
+    } catch (e) { /* 降级到 execCommand */ }
+    var ta = document.createElement("textarea");
+    ta.value = s;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (e) { }
+    document.body.removeChild(ta);
+  }
+
+  /* 重载工作台 iframe：让 ComfyUI 前端重新拉取工作流/模型列表 */
+  function reloadFrame() {
+    if (!last || !last.running) { toast("ComfyUI 没在运行，先启动它", "err"); return; }
+    if (!confirm("重载 ComfyUI 界面？\n\n画布上未保存的改动会丢失；已保存的工作流不受影响。")) return;
+    var f = $("frame");
+    f.src = "about:blank";
+    setTimeout(function () {
+      f.src = CFG.comfyUrl + "/?_t=" + Date.now();
+      frameLoaded = true;
+    }, 80);
+    toast("正在重载界面…");
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (m) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m];
+    });
+  }
+
+  $("btnReloadModels").onclick = loadModels;
+
+  /* ---------------- 画廊 ---------------- */
+  function loadGallery() {
+    api("/api/gallery?limit=120").then(function (r) {
+      if (!r || !r.ok) return;
+      var g = $("galGrid");
+      $("gBadge").textContent = r.total;
+      $("galHint").textContent = r.total
+        ? "共 " + r.total + " 张，显示最新 " + r.items.length + " 张"
+        : "输出目录：" + (last ? "" : "");
+      if (!r.items.length) {
+        g.innerHTML = "";
+        $("galEmpty").style.display = "block";
+        return;
+      }
+      $("galEmpty").style.display = "none";
+      g.innerHTML = r.items.map(function (it) {
+        var u = "/api/img?name=" + encodeURIComponent(it.name) + "&sub=" + encodeURIComponent(it.sub || "");
+        return '<div class="thumb" data-u="' + u + '" data-n="' + esc(it.name) + '" data-t="' + esc(it.timeText) + '">' +
+          '<img loading="lazy" src="' + u + '" alt="' + esc(it.name) + '">' +
+          '<div class="cap"><span>' + esc(shortName(it.name)) + '</span><span>' + it.timeText.slice(5, 16) + '</span></div></div>';
+      }).join("");
+      Array.prototype.forEach.call(g.querySelectorAll(".thumb"), function (el) {
+        el.onclick = function () { openLight(el.dataset.u, el.dataset.n, el.dataset.t); };
+      });
+    });
+  }
+  function shortName(n) { return n.length > 22 ? n.slice(0, 19) + "…" : n; }
+  $("btnReloadGal").onclick = loadGallery;
+
+  function openLight(u, n, t) {
+    $("lightImg").src = u;
+    $("lightMeta").textContent = n + "   ·   " + t;
+    $("light").classList.add("open");
+  }
+  $("lightX").onclick = function () { $("light").classList.remove("open"); };
+  $("light").onclick = function (e) { if (e.target === $("light")) $("light").classList.remove("open"); };
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") $("light").classList.remove("open");
+  });
+
+  /* ---------------- 日志 ---------------- */
+  function loadLog() {
+    api("/api/log?which=" + curLog + "&n=400").then(function (r) {
+      if (!r || !r.ok) return;
+      var txt = r.lines && r.lines.length ? r.lines.join("\n") : "（日志为空）";
+      $("logBox").textContent = txt;
+      $("logBox").scrollTop = $("logBox").scrollHeight;
+    });
+  }
+  $("btnLogComfy").onclick = function () {
+    curLog = "comfy"; $("btnLogComfy").className = "btn"; $("btnLogBox").className = "btn ghost"; loadLog();
+  };
+  $("btnLogBox").onclick = function () {
+    curLog = "box"; $("btnLogBox").className = "btn"; $("btnLogComfy").className = "btn ghost"; loadLog();
+  };
+
+  /* ---------------- 启动 ---------------- */
+  api("/api/config").then(function (r) {
+    if (r && r.ok && r.config && r.config.comfyUrl) CFG.comfyUrl = r.config.comfyUrl;
+  });
+  refreshStatus();
+  setInterval(refreshStatus, 2500);
+  var poll = setInterval(function () {
+    if ($("view-gallery").classList.contains("active")) loadGallery();
+    if ($("view-log").classList.contains("active")) loadLog();
+  }, 5000);
+  window.addEventListener("beforeunload", function () { clearInterval(poll); });
+})();
+</script>
+</body>
+</html>

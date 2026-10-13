@@ -1,0 +1,19 @@
+# ---- 本地运行时数据，绝不能提交 ----
+# 浏览器专用配置目录（含会话数据、cookies）
+browser-profile/
+
+# 运行日志（可能含本机绝对路径）
+logs/
+
+# 本地私有配置（含个人绝对路径）
+config.bat
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 杂项
+*.log
+*.tmp
+Thumbs.db
+desktop.ini
